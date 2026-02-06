@@ -143,9 +143,18 @@ void AsyncBot::setCopyOfExternalPatternBonusTable(const std::unique_ptr<PatternB
   stopAndWait();
   search->setCopyOfExternalPatternBonusTable(table);
 }
+void AsyncBot::setExternalEvalCache(std::shared_ptr<EvalCacheTable> cache) {
+  stopAndWait();
+  search->setExternalEvalCache(cache);
+}
 void AsyncBot::clearSearch() {
   stopAndWait();
   search->clearSearch();
+}
+void AsyncBot::clearEvalCache() {
+  stopAndWait();
+  if(search->evalCache != nullptr)
+    search->evalCache->clear();
 }
 
 bool AsyncBot::makeMove(Loc moveLoc, Player movePla) {
@@ -207,7 +216,7 @@ Loc AsyncBot::genMoveSynchronous(Player movePla, const TimeControls& tc, double 
 
 Loc AsyncBot::genMoveSynchronous(Player movePla, const TimeControls& tc, double sf, const std::function<void()>& onSearchBegun) {
   Loc moveLoc = Board::NULL_LOC;
-  std::function<void(Loc,int,Search*)> onMove = [&moveLoc](Loc loc, int searchId, Search* s) {
+  std::function<void(Loc,int,Search*)> onMove = [&moveLoc](Loc loc, int searchId, Search* s) noexcept {
     assert(searchId == 0);
     (void)searchId; //avoid warning when asserts disabled
     (void)s;
@@ -343,7 +352,7 @@ Loc AsyncBot::genMoveSynchronousAnalyze(
   const std::function<void()>& onSearchBegun
 ) {
   Loc moveLoc = Board::NULL_LOC;
-  std::function<void(Loc,int,Search*)> onMove = [&moveLoc](Loc loc, int searchId, Search* s) {
+  std::function<void(Loc,int,Search*)> onMove = [&moveLoc](Loc loc, int searchId, Search* s) noexcept {
     assert(searchId == 0);
     (void)searchId; //avoid warning when asserts disabled
     (void)s;
@@ -466,7 +475,11 @@ void AsyncBot::internalSearchThreadLoop() {
       callbackLoopThread = std::thread(callbackLoop);
     }
 
-    search->runWholeSearch(shouldStopNow,&searchBegun,pondering,tc,searchFactor);
+    std::function<bool()> shouldStopEarly = [this]() noexcept {
+      return shouldStopNow.load(std::memory_order_acquire);
+    };
+
+    search->runWholeSearch(&searchBegun,&shouldStopEarly,pondering,tc,searchFactor);
     Loc moveLoc = search->getChosenMoveLoc();
 
     if(usingCallbackLoop) {

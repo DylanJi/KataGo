@@ -268,6 +268,9 @@ static void parseSGFRank(
     if(rankStr == "") {
       isUnknown = true;
     }
+    else if(rankStr == "?") {
+      isUnknown = true;
+    }
     else if(rankStr == "-") {
       isUnranked = true;
     }
@@ -556,6 +559,7 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
   string nnModelFile;
   vector<string> sgfDirs;
   string noTrainUsersFile;
+  string onlyTrainUsersFile;
   string noGameUsersFile;
   string isBotUsersFile;
   string excludeGamesFile;
@@ -582,6 +586,7 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
 
     TCLAP::MultiArg<string> sgfDirArg("","sgfdir","Directory of sgf files",false,"DIR");
     TCLAP::ValueArg<string> noTrainUsersArg("","no-train-users-file","Avoid training on these player's moves",true,string(),"TXTFILE");
+    TCLAP::ValueArg<string> onlyTrainUsersArg("","only-train-users-file","Only train on these player's moves",false,string(),"TXTFILE");
     TCLAP::ValueArg<string> noGameUsersArg("","no-game-users-file","Avoid training on games with these players",true,string(),"TXTFILE");
     TCLAP::ValueArg<string> isBotUsersArg("","is-bot-users-file","Mark these usernames as bots",true,string(),"TXTFILE");
     TCLAP::ValueArg<string> excludeGamesArg("","exclude-games-file","Exclude games whose paths contain these strings",false,string(),"TXTFILE");
@@ -602,6 +607,7 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
 
     cmd.add(sgfDirArg);
     cmd.add(noTrainUsersArg);
+    cmd.add(onlyTrainUsersArg);
     cmd.add(noGameUsersArg);
     cmd.add(isBotUsersArg);
     cmd.add(excludeGamesArg);
@@ -625,6 +631,7 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
     nnModelFile = cmd.getModelFile();
     sgfDirs = sgfDirArg.getValue();
     noTrainUsersFile = noTrainUsersArg.getValue();
+    onlyTrainUsersFile = onlyTrainUsersArg.getValue();
     noGameUsersFile = noGameUsersArg.getValue();
     isBotUsersFile = isBotUsersArg.getValue();
     excludeGamesFile = excludeGamesArg.getValue();
@@ -673,7 +680,7 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
   const int numSearchThreads = 1;
   const int numTotalThreads = numWorkerThreads * numSearchThreads;
 
-  const int dataBoardLen = cfg.getInt("dataBoardLen",3,37);
+  const int dataBoardLen = cfg.getInt("dataBoardLen",3,Board::MAX_LEN);
   const int maxApproxRowsPerTrainFile = cfg.getInt("maxApproxRowsPerTrainFile",1,100000000);
 
   const std::vector<std::pair<int,int>> allowedBoardSizes =
@@ -688,6 +695,8 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
   const int numGlobalChannels = NNInputs::NUM_FEATURES_GLOBAL_V7;
 
   const std::set<string> noTrainUsers = loadStrippedTxtFileLines(noTrainUsersFile);
+  const std::set<string> onlyTrainUsers =
+    (onlyTrainUsersFile != "") ? loadStrippedTxtFileLines(onlyTrainUsersFile) : std::set<string>();
   const std::set<string> noGameUsers = loadStrippedTxtFileLines(noGameUsersFile);
   const std::set<string> isBotUsers = loadStrippedTxtFileLines(isBotUsersFile);
   const std::set<string> excludeFiles =
@@ -847,7 +856,7 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
       }
     }
 
-    std::unique_ptr<Sgf> sgfRaw = NULL;
+    std::unique_ptr<Sgf> sgfRaw = nullptr;
     XYSize xySize;
     try {
       sgfRaw = std::unique_ptr<Sgf>(Sgf::loadFile(fileName));
@@ -898,9 +907,9 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
     const string sizeStr = " (size " + Global::intToString(xySize.x) + "x" + Global::intToString(xySize.y) + ")";
     const string bSizeStr = Global::intToString(xySize.x) + "x" + Global::intToString(xySize.y);
 
-    std::unique_ptr<CompactSgf> sgf = NULL;
+    std::unique_ptr<CompactSgf> sgf = nullptr;
     try {
-      sgf = std::make_unique<CompactSgf>(sgfRaw.get());
+      sgf = std::make_unique<CompactSgf>(*sgfRaw);
     }
     catch(const StringError& e) {
       logger.write("Invalid SGF " + fileName + ": " + e.what());
@@ -1073,8 +1082,14 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
       isBotW = isBotW || isLikelyBot(sgfWUsername,whatDataSource);
     }
 
-    const bool shouldTrainB = noTrainUsers.find(sgfBUsername) == noTrainUsers.end() && !(noTrainOnBots && isBotB);
-    const bool shouldTrainW = noTrainUsers.find(sgfWUsername) == noTrainUsers.end() && !(noTrainOnBots && isBotW);
+    const bool shouldTrainB =
+      noTrainUsers.find(sgfBUsername) == noTrainUsers.end()
+      && !(noTrainOnBots && isBotB)
+      && !(onlyTrainUsers.size() > 0 && onlyTrainUsers.find(sgfBUsername) == onlyTrainUsers.end());
+    const bool shouldTrainW =
+      noTrainUsers.find(sgfWUsername) == noTrainUsers.end()
+      && !(noTrainOnBots && isBotW)
+      && !(onlyTrainUsers.size() > 0 && onlyTrainUsers.find(sgfWUsername) == onlyTrainUsers.end());
 
     if(!shouldTrainB && !shouldTrainW) {
       if(verbosity >= 2)
@@ -2321,6 +2336,7 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
       const std::vector<ChangedNeuralNet*> changedNeuralNets;
       const bool hitTurnLimit = false;
       const int mode = 0;
+      const std::vector<QValueTargets> whiteQValueTargets;
 
       if(
         trainingWeights[m] > 1e-8
@@ -2342,6 +2358,7 @@ int MainCmds::writetrainingdata(const vector<string>& args) {
           policyEntropy,
           searchEntropy,
           whiteValueTargets,
+          whiteQValueTargets,
           turnIdx,
           valueTargetWeight,
           tdValueTargetWeight,

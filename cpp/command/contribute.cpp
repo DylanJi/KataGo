@@ -142,6 +142,18 @@ static void runAndUploadSingleGame(
 
   istringstream taskCfgIn(gameTask.task.config);
   ConfigParser taskCfg(taskCfgIn);
+  const std::string overrides = gameTask.repIdx < gameTask.task.overrides.size() ? gameTask.task.overrides[gameTask.repIdx] : std::string();
+  try {
+    if(overrides.size() > 0) {
+      map<string,string> newkvs = ConfigParser::parseCommaSeparated(overrides);
+      taskCfg.overrideKeys(newkvs);
+    }
+  }
+  catch(StringError& e) {
+    cerr << "Error applying overrides " << overrides << endl;
+    cerr << e.what() << endl;
+    throw;
+  }
 
   NNEvaluator* nnEvalBlack = gameTask.nnEvalBlack;
   NNEvaluator* nnEvalWhite = gameTask.nnEvalWhite;
@@ -261,7 +273,7 @@ static void runAndUploadSingleGame(
 
       // Usual analysis response fields
       ret["turnNumber"] = hist.moveHistory.size();
-      search->getAnalysisJson(perspective,analysisPVLen,preventEncore,true,alwaysIncludeOwnership,false,false,false,false,ret);
+      search->getAnalysisJson(perspective,analysisPVLen,preventEncore,true,alwaysIncludeOwnership,false,false,false,false,false,ret);
       std::cout << ret.dump() + "\n" << std::flush; // no endl due to race conditions
     }
 
@@ -316,38 +328,43 @@ static void runAndUploadSingleGame(
       if(gameTask.task.doWriteTrainingData) {
         //Pre-upload, verify that the GPU is okay.
         Tests::runCanaryTests(nnEvalBlack, NNInputs::SYMMETRY_NOTSPECIFIED, false);
+
+        string resultingFilename;
+        int64_t numDataRows = 0;
+        bool producedFile = false;
         gameTask.blackManager->withDataWriters(
           nnEvalBlack,
-          [gameData,&gameTask,gameIdx,&sgfFile,&connection,&logger,&shouldStopFunc,&posSample](
+          [gameData,&gameTask,gameIdx,&sgfFile,&connection,&logger,&shouldStopFunc,&posSample,&resultingFilename,&numDataRows,&producedFile](
             TrainingDataWriter* tdataWriter, std::ofstream* sgfOut
           ) {
             (void)sgfOut;
             assert(tdataWriter->isEmpty());
             tdataWriter->writeGame(*gameData);
-            string resultingFilename;
-            int64_t numDataRows = tdataWriter->numRowsInBuffer();
-            bool producedFile = tdataWriter->flushIfNonempty(resultingFilename);
-            //It's possible we'll have zero data if the game started in a nearly finished position and cheap search never
-            //gave us a real turn of search, in which case just ignore that game.
-            if(producedFile) {
-              bool suc = false;
-              try {
-                suc = connection->uploadTrainingGameAndData(gameTask.task,gameData,posSample,sgfFile,resultingFilename,numDataRows,retryOnFailure,shouldStopFunc);
-              }
-              catch(StringError& e) {
-                logger.write(string("Giving up uploading training game and data due to error:\n") + e.what());
-                suc = false;
-              }
-              if(suc)
-                logger.write(
-                  "Finished game " + Global::int64ToString(gameIdx)  + " (training), uploaded sgf " + sgfFile + " and training data " + resultingFilename
-                  + " (" + Global::int64ToString(numDataRows) + " rows)"
-                );
-            }
-            else {
-              logger.write("Finished game " + Global::int64ToString(gameIdx) + " (training), skipping uploading sgf " + sgfFile + " since it's an empty game");
-            }
-          });
+            numDataRows = tdataWriter->numRowsInBuffer();
+            producedFile = tdataWriter->flushIfNonempty(resultingFilename);
+          }
+        );
+
+        //It's possible we'll have zero data if the game started in a nearly finished position and cheap search never
+        //gave us a real turn of search, in which case just ignore that game.
+        if(producedFile) {
+          bool suc = false;
+          try {
+            suc = connection->uploadTrainingGameAndData(gameTask.task,gameData,posSample,sgfFile,resultingFilename,numDataRows,retryOnFailure,shouldStopFunc);
+          }
+          catch(StringError& e) {
+            logger.write(string("Giving up uploading training game and data due to error:\n") + e.what());
+            suc = false;
+          }
+          if(suc)
+            logger.write(
+              "Finished game " + Global::int64ToString(gameIdx)  + " (training), uploaded sgf " + sgfFile + " and training data " + resultingFilename
+              + " (" + Global::int64ToString(numDataRows) + " rows)"
+            );
+        }
+        else {
+          logger.write("Finished game " + Global::int64ToString(gameIdx) + " (training), skipping uploading sgf " + sgfFile + " since it's an empty game");
+        }
       }
       else {
         bool suc = false;
@@ -533,7 +550,7 @@ int MainCmds::contribute(const vector<string>& args) {
     maxSimultaneousGames = 16;
   }
   else {
-    maxSimultaneousGames = userCfg->getInt("maxSimultaneousGames", 1, 4000);
+    maxSimultaneousGames = userCfg->getInt("maxSimultaneousGames", 1, 16000);
   }
   bool onlyPlayRatingMatches = false;
   if(userCfg->contains("onlyPlayRatingMatches")) {
@@ -913,12 +930,29 @@ int MainCmds::contribute(const vector<string>& args) {
 
       const bool verbose = false;
       const bool quickTest = true;
-      const int boardSizeTest = 19;
       // Cap test to avoid spawning too many threads when many selfplay games are running
       const int maxBatchSizeCap = std::min(4, 1 + nnEval->getMaxBatchSize()/2);
       bool fp32BatchSuccessBuf = true;
-      string referenceFileName = "";
-      bool success = Tests::runBackendErrorTest(nnEval,nnEval32,logger,boardSizeTest,maxBatchSizeCap,verbose,quickTest,fp32BatchSuccessBuf,referenceFileName);
+      bool fp32BatchSuccessBufRect = true;
+      const string referenceFileName = "";
+      const double policyOptimismForTest = 0.25;
+      const double pdaForTest = 0.0;
+      const double nnPolicyTemperatureForTest = 1.0;
+
+      bool success = Tests::runBackendErrorTest(
+        nnEval,nnEval32,logger,"19",maxBatchSizeCap,verbose,quickTest,
+        policyOptimismForTest,pdaForTest,nnPolicyTemperatureForTest,
+        fp32BatchSuccessBuf,referenceFileName
+      );
+      bool successRect = Tests::runBackendErrorTest(
+        nnEval,nnEval32,logger,"rectangle",maxBatchSizeCap,verbose,quickTest,
+        policyOptimismForTest,pdaForTest,nnPolicyTemperatureForTest,
+        fp32BatchSuccessBufRect,referenceFileName
+      );
+
+      fp32BatchSuccessBuf = fp32BatchSuccessBuf && fp32BatchSuccessBufRect;
+      success = success && successRect;
+
       if(!fp32BatchSuccessBuf) {
         logger.write("Error: large GPU numerical errors, unable to continue");
         shouldStop.store(true);

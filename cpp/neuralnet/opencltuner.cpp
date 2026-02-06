@@ -951,9 +951,9 @@ static bool testAllConfigs(
   return true;
 }
 
-#define SETTER(field) std::function<void(OpenCLTuneParams&, int value)>([](OpenCLTuneParams& p, int value){ p.field = value; })
-#define ISVALID(field) std::function<bool(const OpenCLTuneParams&)>([](const OpenCLTuneParams& p){ return p.field.isValid(); })
-#define ISSIMPLE(field) std::function<bool(const OpenCLTuneParams&)>([](const OpenCLTuneParams& p){ return p.field.isSimple(); })
+#define SETTER(field) std::function<void(OpenCLTuneParams&, int value)>([](OpenCLTuneParams& p, int value) noexcept { p.field = value; })
+#define ISVALID(field) std::function<bool(const OpenCLTuneParams&)>([](const OpenCLTuneParams& p) noexcept { return p.field.isValid(); })
+#define ISSIMPLE(field) std::function<bool(const OpenCLTuneParams&)>([](const OpenCLTuneParams& p) noexcept { return p.field.isSimple(); })
 
 OpenCLTuner::ModelInfoForTuning OpenCLTuner::ModelInfoForTuning::ofDesc(const ModelDesc* desc) {
   OpenCLTuner::ModelInfoForTuning modelInfo;
@@ -3350,7 +3350,7 @@ void OpenCLTuner::autoTuneEverything(
   string gpuName = allDeviceInfos[gpuIdxForTuning].name;
 
   //Just hardcodedly tune all the models that KataGo's main run uses.
-  static_assert(NNModelVersion::latestModelVersionImplemented == 15, "");
+  static_assert(NNModelVersion::latestModelVersionImplemented == 16, "");
   vector<ModelInfoForTuning> modelInfos;
   {
     ModelInfoForTuning modelInfo;
@@ -3449,6 +3449,17 @@ void OpenCLTuner::autoTuneEverything(
     modelInfo.regularNumChannels = 192;
     modelInfo.gpoolNumChannels = 64;
     modelInfo.modelVersion = 15;
+    modelInfos.push_back(modelInfo);
+  }
+  {
+    ModelInfoForTuning modelInfo;
+    modelInfo.maxConvChannels1x1 = 512;
+    modelInfo.maxConvChannels3x3 = 512;
+    modelInfo.trunkNumChannels = 512;
+    modelInfo.midNumChannels = 256;
+    modelInfo.regularNumChannels = 192;
+    modelInfo.gpoolNumChannels = 64;
+    modelInfo.modelVersion = 16;
     modelInfos.push_back(modelInfo);
   }
 

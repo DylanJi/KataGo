@@ -69,6 +69,7 @@ SearchParams::SearchParams()
    avoidMYTDaggerHackPla(C_EMPTY),
    wideRootNoise(0.0),
    enablePassingHacks(false),
+   enableMorePassingHacks(false),
    playoutDoublingAdvantage(0.0),
    playoutDoublingAdvantagePla(C_EMPTY),
    avoidRepeatedPatternUtility(0.0),
@@ -80,6 +81,8 @@ SearchParams::SearchParams()
    subtreeValueBiasTableNumShards(65536),
    subtreeValueBiasFreeProp(0.8),
    subtreeValueBiasWeightExponent(0.5),
+   useEvalCache(false),
+   evalCacheMinVisits(100),
    nodeTableShardsPowerOfTwo(16),
    numVirtualLossesPerThread(3.0),
    numThreads(1),
@@ -194,6 +197,7 @@ bool SearchParams::operator==(const SearchParams& other) const {
     avoidMYTDaggerHackPla == other.avoidMYTDaggerHackPla &&
     wideRootNoise == other.wideRootNoise &&
     enablePassingHacks == other.enablePassingHacks &&
+    enableMorePassingHacks == other.enableMorePassingHacks &&
 
     playoutDoublingAdvantage == other.playoutDoublingAdvantage &&
     playoutDoublingAdvantagePla == other.playoutDoublingAdvantagePla &&
@@ -210,6 +214,9 @@ bool SearchParams::operator==(const SearchParams& other) const {
     subtreeValueBiasTableNumShards == other.subtreeValueBiasTableNumShards &&
     subtreeValueBiasFreeProp == other.subtreeValueBiasFreeProp &&
     subtreeValueBiasWeightExponent == other.subtreeValueBiasWeightExponent &&
+
+    useEvalCache == other.useEvalCache &&
+    evalCacheMinVisits == other.evalCacheMinVisits &&
 
     nodeTableShardsPowerOfTwo == other.nodeTableShardsPowerOfTwo &&
     numVirtualLossesPerThread == other.numVirtualLossesPerThread &&
@@ -359,6 +366,14 @@ void SearchParams::failIfParamsDifferOnUnchangeableParameter(const SearchParams&
   if(dynamic.nodeTableShardsPowerOfTwo != initial.nodeTableShardsPowerOfTwo) {
     throw StringError("Cannot change nodeTableShardsPowerOfTwo after initialization");
   }
+
+  // Analysis engine shares eval cache across multiple analysis threads, so changing/overriding it is awkward.
+  if(dynamic.useEvalCache != initial.useEvalCache) {
+    throw StringError("Cannot change useEvalCache after initialization");
+  }
+  if(dynamic.evalCacheMinVisits != initial.evalCacheMinVisits) {
+    throw StringError("Cannot change evalCacheMinVisits after initialization");
+  }
 }
 
 json SearchParams::changeableParametersToJson() const {
@@ -437,6 +452,7 @@ json SearchParams::changeableParametersToJson() const {
   // ret["avoidMYTDaggerHackPla"] = PlayerIO::playerToStringShort(avoidMYTDaggerHackPla);
   ret["wideRootNoise"] = wideRootNoise;
   ret["enablePassingHacks"] = enablePassingHacks;
+  ret["enableMorePassingHacks"] = enableMorePassingHacks;
 
   // Special handling in GTP
   ret["playoutDoublingAdvantage"] = playoutDoublingAdvantage;
@@ -457,10 +473,13 @@ json SearchParams::changeableParametersToJson() const {
   ret["subtreeValueBiasFreeProp"] = subtreeValueBiasFreeProp;
   ret["subtreeValueBiasWeightExponent"] = subtreeValueBiasWeightExponent;
 
+  // ret["useEvalCache"] = useEvalCache;
+  // ret["evalCacheMinVisits"] = evalCacheMinVisits;
+
   // ret["nodeTableShardsPowerOfTwo"] = nodeTableShardsPowerOfTwo;
   ret["numVirtualLossesPerThread"] = numVirtualLossesPerThread;
 
-  // ret["numThreads"] = numThreads;
+  ret["numSearchThreads"] = numThreads; // NOTE: different name since that's how setup.cpp loads it
   ret["minPlayoutsPerThread"] = minPlayoutsPerThread;
   ret["maxVisits"] = maxVisits;
   ret["maxPlayouts"] = maxPlayouts;
@@ -585,6 +604,7 @@ void SearchParams::printParams(std::ostream& out) const {
   std::cout << "avoidMYTDaggerHackPla" << ": " << (int)avoidMYTDaggerHackPla << std::endl;
   PRINTPARAM(wideRootNoise);
   PRINTPARAM(enablePassingHacks);
+  PRINTPARAM(enableMorePassingHacks);
 
   PRINTPARAM(playoutDoublingAdvantage);
   std::cout << "playoutDoublingAdvantagePla" << ": " << (int)playoutDoublingAdvantagePla << std::endl;
@@ -602,6 +622,8 @@ void SearchParams::printParams(std::ostream& out) const {
   PRINTPARAM(subtreeValueBiasFreeProp);
   PRINTPARAM(subtreeValueBiasWeightExponent);
 
+  PRINTPARAM(useEvalCache);
+  PRINTPARAM(evalCacheMinVisits);
 
   PRINTPARAM(nodeTableShardsPowerOfTwo);
   PRINTPARAM(numVirtualLossesPerThread);

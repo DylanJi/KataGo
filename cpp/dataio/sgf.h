@@ -12,7 +12,7 @@ STRUCT_NAMED_TRIPLE(uint8_t,x,uint8_t,y,Player,pla,MoveNoBSize);
 STRUCT_NAMED_PAIR(int,x,int,y,XYSize);
 
 struct SgfNode {
-  std::map<std::string,std::vector<std::string>>* props;
+  std::unique_ptr<std::map<std::string,std::vector<std::string>>> props;
   MoveNoBSize move;
 
   SgfNode();
@@ -43,14 +43,16 @@ struct SgfNode {
   Player getSgfWinner() const;
   float getKomiOrFail() const;
   float getKomiOrDefault(float defaultKomi) const;
+
+  std::string getPlayerName(Player pla) const;
 };
 
 struct Sgf {
   static constexpr int RANK_UNKNOWN = -100000;
 
   std::string fileName;
-  std::vector<SgfNode*> nodes;
-  std::vector<Sgf*> children;
+  std::vector<std::unique_ptr<SgfNode>> nodes;
+  std::vector<std::unique_ptr<Sgf>> children;
   Hash128 hash;
 
   Sgf();
@@ -59,13 +61,13 @@ struct Sgf {
   Sgf(const Sgf&) = delete;
   Sgf& operator=(const Sgf&) = delete;
 
-  static Sgf* parse(const std::string& str);
-  static Sgf* loadFile(const std::string& file);
-  static std::vector<Sgf*> loadFiles(const std::vector<std::string>& files);
-  static std::vector<Sgf*> loadSgfsFile(const std::string& file);
-  static std::vector<Sgf*> loadSgfsFiles(const std::vector<std::string>& files);
+  static std::unique_ptr<Sgf> parse(const std::string& str);
+  static std::unique_ptr<Sgf> loadFile(const std::string& file);
+  static std::vector<std::unique_ptr<Sgf>> loadFiles(const std::vector<std::string>& files);
+  static std::vector<std::unique_ptr<Sgf>> loadSgfsFile(const std::string& file);
+  static std::vector<std::unique_ptr<Sgf>> loadSgfsFiles(const std::vector<std::string>& files);
 
-  static std::vector<Sgf*> loadSgfOrSgfsLogAndIgnoreErrors(const std::string& file, Logger& logger);
+  static std::vector<std::unique_ptr<Sgf>> loadSgfOrSgfsLogAndIgnoreErrors(const std::string& file, Logger& logger);
 
   XYSize getXYSize() const;
   float getKomiOrFail() const;
@@ -88,6 +90,13 @@ struct Sgf {
 
   void getPlacements(std::vector<Move>& moves, int xSize, int ySize) const;
   void getMoves(std::vector<Move>& moves, int xSize, int ySize) const;
+
+  template<typename T>
+  T traverse(
+    T initialValue,
+    std::function<T(T, T)> reduce,
+    std::function<T(const Sgf*, T)> transform
+  ) const;
 
   //Maximum depth of sgf tree in nodes
   int64_t depth() const;
@@ -123,11 +132,15 @@ struct Sgf {
     Sgf::PositionSample previousPosition(double newWeight) const;
     bool hasPreviousPositions(int numPrevious) const;
 
+    bool tryGetCurrentBoardHistory(const Rules& rules, Player& nextPlaToMove, BoardHistory& hist) const;
+
     int64_t getCurrentTurnNumber() const;
 
     //For the moment, only used in testing since it does extra consistency checks.
     //If we need a version to be used in "prod", we could make an efficient version maybe as operator==.
     bool isEqualForTesting(const PositionSample& other, bool checkNumCaptures, bool checkSimpleKo) const;
+
+    static void writePosOfHist(PositionSample& sampleBuf, const BoardHistory& hist, Player nextPla);
   };
 
   //Loads SGF all unique positions in ALL branches of that SGF.
@@ -212,16 +225,16 @@ struct CompactSgf {
   Player sgfWinner;
   Hash128 hash;
 
-  CompactSgf(const Sgf* sgf);
+  CompactSgf(const Sgf& sgf);
   CompactSgf(Sgf&& sgf);
   ~CompactSgf();
 
   CompactSgf(const CompactSgf&) = delete;
   CompactSgf& operator=(const CompactSgf&) = delete;
 
-  static CompactSgf* parse(const std::string& str);
-  static CompactSgf* loadFile(const std::string& file);
-  static std::vector<CompactSgf*> loadFiles(const std::vector<std::string>& files);
+  static std::unique_ptr<CompactSgf> parse(const std::string& str);
+  static std::unique_ptr<CompactSgf> loadFile(const std::string& file);
+  static std::vector<std::unique_ptr<CompactSgf>> loadFiles(const std::vector<std::string>& files);
 
   bool hasRules() const;
   Rules getRulesOrFail() const;

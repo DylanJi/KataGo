@@ -92,24 +92,8 @@ void NeuralNet::freeLoadedModel(LoadedModel* loadedModel) {
   delete loadedModel;
 }
 
-string NeuralNet::getModelName(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.name;
-}
-
-int NeuralNet::getModelVersion(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.modelVersion;
-}
-
-int NeuralNet::getNumInputMetaChannels(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.numInputMetaChannels;
-}
-
-Rules NeuralNet::getSupportedRules(const LoadedModel* loadedModel, const Rules& desiredRules, bool& supported) {
-  return loadedModel->modelDesc.getSupportedRules(desiredRules, supported);
-}
-
-ModelPostProcessParams NeuralNet::getPostProcessParams(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.postProcessParams;
+const ModelDesc& NeuralNet::getModelDesc(const LoadedModel* loadedModel) {
+  return loadedModel->modelDesc;
 }
 
 
@@ -262,7 +246,7 @@ struct ScratchBuffers {
     std::function<float*(size_t)> allocateFunc = [this](size_t size) {
       return new float[size/sizeof(float)];
     };
-    std::function<void(float*)> releaseFunc = [this](float* buf) {
+    std::function<void(float*)> releaseFunc = [this](float* buf) noexcept {
       delete[] buf;
     };
 
@@ -717,13 +701,15 @@ struct BatchNormLayer {
     activation(actDesc.activation)
   {
     int numChannels = desc.numChannels;
-    float epsilon = desc.epsilon;
+
+    assert(desc.mergedScale.size() == numChannels);
+    assert(desc.mergedBias.size() == numChannels);
 
     mergedScale.resize(numChannels);
     mergedBias.resize(numChannels);
     for(int c = 0; c < numChannels; c++) {
-      mergedScale[c] = desc.scale[c] / sqrt(desc.variance[c] + epsilon);
-      mergedBias[c] = desc.bias[c] - mergedScale[c] * desc.mean[c];
+      mergedScale[c] = desc.mergedScale[c];
+      mergedBias[c] = desc.mergedBias[c];
     }
   }
 
@@ -744,8 +730,10 @@ struct BatchNormLayer {
       output->chip(c, 0) = (*mask == 1.0f).select(x.cwiseMax(0.0f), z);
     else if(activation == ACTIVATION_MISH)
       output->chip(c, 0) = (*mask == 1.0f).select(x * (x.cwiseMin(20.0f).exp().log1p() + (x.cwiseMax(20.0f) - 20.0f)).tanh(), z);
+    else if(activation == ACTIVATION_MISH_SCALE8)
+      testAssert(false); // Eigen does not use scaled mish activations due to no fp16
     else
-      assert(false);
+      testAssert(false);
     }
   }
 };
@@ -773,6 +761,10 @@ struct ActivationLayer {
       *output = input->cwiseMax(0.0f);
     else if(activation == ACTIVATION_MISH)
       *output = (*input) * ((input->cwiseMin(20.0f)).exp().log1p() + (input->cwiseMax(20.0f) - 20.0f)).tanh();
+    else if(activation == ACTIVATION_MISH_SCALE8)
+      testAssert(false); // Eigen does not use scaled mish activations due to no fp16
+    else
+      testAssert(false);
   }
   template <int N>
   void apply(const TensorMap<Tensor<SCALAR, N>>* input, TensorMap<Tensor<SCALAR, N>>* output) const {
@@ -782,6 +774,10 @@ struct ActivationLayer {
       *output = input->cwiseMax(0.0f);
     else if(activation == ACTIVATION_MISH)
       *output = (*input) * ((input->cwiseMin(20.0f)).exp().log1p() + (input->cwiseMax(20.0f) - 20.0f)).tanh();
+    else if(activation == ACTIVATION_MISH_SCALE8)
+      testAssert(false); // Eigen does not use scaled mish activations due to no fp16
+    else
+      testAssert(false);
   }
 };
 
@@ -1912,11 +1908,11 @@ void NeuralNet::getOutput(
     // policy probabilities and white game outcome probabilities
     // Also we don't fill in the nnHash here either
     // Handle version >= 12 policy optimism
-    if(numPolicyChannels == 2) {
+    if(numPolicyChannels == 2 || (numPolicyChannels == 4 && modelVersion >= 16)) {
       // Eigen is all NHWC
       for(int i = 0; i<nnXLen*nnYLen; i++) {
-        float p = policySrcBuf[i*2];
-        float pOpt = policySrcBuf[i*2+1];
+        float p = policySrcBuf[i*numPolicyChannels];
+        float pOpt = policySrcBuf[i*numPolicyChannels+1];
         policyProbsTmp[i] = p + (pOpt-p) * policyOptimism;
       }
       SymmetryHelpers::copyOutputsWithSymmetry(policyProbsTmp, policyProbs, 1, nnYLen, nnXLen, inputBufs[row]->symmetry);

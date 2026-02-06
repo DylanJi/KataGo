@@ -16,11 +16,11 @@ import torch
 import torch.nn
 from torch.optim.swa_utils import AveragedModel
 
-import modelconfigs
-from model_pytorch import Model, ExtraOutputs, MetadataEncoder
-from metrics_pytorch import Metrics
-import data_processing_pytorch
-from load_model import load_model
+from katago.train import modelconfigs
+from katago.train.model_pytorch import Model, ExtraOutputs, MetadataEncoder
+from katago.train.metrics_pytorch import Metrics
+from katago.train import data_processing_pytorch
+from katago.train.load_model import load_model
 
 # HANDLE COMMAND AND ARGS -------------------------------------------------------------------
 
@@ -196,6 +196,7 @@ def main(args):
             pos_len,
             device,
             randomize_symmetries=True,
+            include_meta=model.get_has_metadata_encoder(),
             model_config=model_config,
         ):
             if max_batches is not None and num_batches_tested >= max_batches:

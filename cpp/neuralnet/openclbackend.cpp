@@ -113,6 +113,7 @@ struct LoadedModel {
 
   LoadedModel(const string& fileName, const string& expectedSha256) {
     ModelDesc::loadFromFileMaybeGZipped(fileName,modelDesc,expectedSha256);
+    modelDesc.applyScale8ToReduceActivations();
   }
 
   LoadedModel() = delete;
@@ -129,24 +130,8 @@ void NeuralNet::freeLoadedModel(LoadedModel* loadedModel) {
   delete loadedModel;
 }
 
-string NeuralNet::getModelName(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.name;
-}
-
-int NeuralNet::getModelVersion(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.modelVersion;
-}
-
-int NeuralNet::getNumInputMetaChannels(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.numInputMetaChannels;
-}
-
-Rules NeuralNet::getSupportedRules(const LoadedModel* loadedModel, const Rules& desiredRules, bool& supported) {
-  return loadedModel->modelDesc.getSupportedRules(desiredRules, supported);
-}
-
-ModelPostProcessParams NeuralNet::getPostProcessParams(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.postProcessParams;
+const ModelDesc& NeuralNet::getModelDesc(const LoadedModel* loadedModel) {
+  return loadedModel->modelDesc;
 }
 
 //---------------------------------------------------------------------------------------------------------
@@ -166,14 +151,17 @@ struct CompiledPrograms {
   CLProgram winogradConv3x3NCHWTransformProgram;
   CLProgram winogradConv3x3NCHWBNReluTransformProgram;
   CLProgram winogradConv3x3NCHWBNMishTransformProgram;
+  CLProgram winogradConv3x3NCHWBNMishScale8TransformProgram;
   CLProgram winogradConv3x3NCHWUntransformProgram;
   CLProgram winogradConv5x5NCHWTransformProgram;
   CLProgram winogradConv5x5NCHWBNReluTransformProgram;
   CLProgram winogradConv5x5NCHWBNMishTransformProgram;
+  CLProgram winogradConv5x5NCHWBNMishScale8TransformProgram;
   CLProgram winogradConv5x5NCHWUntransformProgram;
   CLProgram scaleBiasMaskNCHWProgram;
   CLProgram scaleBiasMaskReluNCHWProgram;
   CLProgram scaleBiasMaskMishNCHWProgram;
+  CLProgram scaleBiasMaskMishScale8NCHWProgram;
   CLProgram addPointWiseProgram;
   CLProgram sumChannelsNCHWProgram;
   CLProgram gPoolChannelsNCHWMaskProgram;
@@ -182,6 +170,7 @@ struct CompiledPrograms {
   CLProgram addCBiasesNCProgram;
   CLProgram addCBiasesNCReluProgram;
   CLProgram addCBiasesNCMishProgram;
+  CLProgram addCBiasesNCMishScale8Program;
   CLProgram extractChannel0NCHWProgram;
   CLProgram xgemmDirectProgram;
   CLProgram xgemmDirectProgramAlwaysFP32;
@@ -225,6 +214,10 @@ struct CompiledPrograms {
       "winogradConv3x3NCHWBNMishTransformProgram", context, deviceIdsToUse, OpenCLKernels::winogradBNActTransformNCHW,
       tuneParams.conv3x3.compileOptions() + maybeFP16CompileOptions + OpenCLKernels::actMishDefine
     );
+    winogradConv3x3NCHWBNMishScale8TransformProgram = compileProgram(
+      "winogradConv3x3NCHWBNMishScale8TransformProgram", context, deviceIdsToUse, OpenCLKernels::winogradBNActTransformNCHW,
+      tuneParams.conv3x3.compileOptions() + maybeFP16CompileOptions + OpenCLKernels::actMishScale8Define
+    );
     winogradConv3x3NCHWUntransformProgram = compileProgram(
       "winogradConv3x3NCHWUntransformProgram", context, deviceIdsToUse, OpenCLKernels::winogradUntransformNCHW,
       tuneParams.conv3x3.compileOptions() + maybeFP16CompileOptions
@@ -240,6 +233,10 @@ struct CompiledPrograms {
     winogradConv5x5NCHWBNMishTransformProgram = compileProgram(
       "winogradConv5x5NCHWBNMishTransformProgram", context, deviceIdsToUse, OpenCLKernels::winogradBNActTransformNCHW,
       tuneParams.conv5x5.compileOptions() + maybeFP16CompileOptions + OpenCLKernels::actMishDefine
+    );
+    winogradConv5x5NCHWBNMishScale8TransformProgram = compileProgram(
+      "winogradConv5x5NCHWBNMishScale8TransformProgram", context, deviceIdsToUse, OpenCLKernels::winogradBNActTransformNCHW,
+      tuneParams.conv5x5.compileOptions() + maybeFP16CompileOptions + OpenCLKernels::actMishScale8Define
     );
     winogradConv5x5NCHWUntransformProgram = compileProgram(
       "winogradConv5x5NCHWUntransformProgram", context, deviceIdsToUse, OpenCLKernels::winogradUntransformNCHW,
@@ -257,6 +254,10 @@ struct CompiledPrograms {
     scaleBiasMaskMishNCHWProgram = compileProgram(
       "scaleBiasMaskMishNCHWProgram", context, deviceIdsToUse, OpenCLKernels::scaleBiasMaskActNCHW,
       maybeFP16CompileOptions + OpenCLKernels::actMishDefine
+    );
+    scaleBiasMaskMishScale8NCHWProgram = compileProgram(
+      "scaleBiasMaskMishScale8NCHWProgram", context, deviceIdsToUse, OpenCLKernels::scaleBiasMaskActNCHW,
+      maybeFP16CompileOptions + OpenCLKernels::actMishScale8Define
     );
     addPointWiseProgram = compileProgram(
       "addPointWiseProgram", context, deviceIdsToUse, OpenCLKernels::addPointWise,
@@ -289,6 +290,10 @@ struct CompiledPrograms {
     addCBiasesNCMishProgram = compileProgram(
       "addCBiasesNCMishProgram", context, deviceIdsToUse, OpenCLKernels::addCBiasesNCAct,
       maybeFP16CompileOptions + OpenCLKernels::actMishDefine
+    );
+    addCBiasesNCMishScale8Program = compileProgram(
+      "addCBiasesNCMishScale8Program", context, deviceIdsToUse, OpenCLKernels::addCBiasesNCAct,
+      maybeFP16CompileOptions + OpenCLKernels::actMishScale8Define
     );
     extractChannel0NCHWProgram = compileProgram(
       "extractChannel0NCHWProgram", context, deviceIdsToUse, OpenCLKernels::extractChannel0NCHW,
@@ -435,7 +440,7 @@ static ComputeContext* createComputeContextForTesting(
   enabled_t useNHWCMode = useNHWC ? enabled_t::True : enabled_t::False;
 
   std::function<OpenCLTuneParams(const string&,int)> getParamsForDeviceName =
-    [](const string& name, int gpuIdxForTuning) {
+    [](const string& name, int gpuIdxForTuning) noexcept {
     (void)name;
     (void)gpuIdxForTuning;
     //Just use default values
@@ -505,14 +510,17 @@ struct ComputeHandleInternal {
   CLKernel winogradConv3x3NCHWTransformKernel;
   CLKernel winogradConv3x3NCHWBNReluTransformKernel;
   CLKernel winogradConv3x3NCHWBNMishTransformKernel;
+  CLKernel winogradConv3x3NCHWBNMishScale8TransformKernel;
   CLKernel winogradConv3x3NCHWUntransformKernel;
   CLKernel winogradConv5x5NCHWTransformKernel;
   CLKernel winogradConv5x5NCHWBNReluTransformKernel;
   CLKernel winogradConv5x5NCHWBNMishTransformKernel;
+  CLKernel winogradConv5x5NCHWBNMishScale8TransformKernel;
   CLKernel winogradConv5x5NCHWUntransformKernel;
   CLKernel scaleBiasMaskNCHWKernel;
   CLKernel scaleBiasMaskReluNCHWKernel;
   CLKernel scaleBiasMaskMishNCHWKernel;
+  CLKernel scaleBiasMaskMishScale8NCHWKernel;
   CLKernel addPointWiseKernel;
   CLKernel sumChannelsNCHWKernel;
   CLKernel gPoolChannelsNCHWMaskKernel;
@@ -521,6 +529,7 @@ struct ComputeHandleInternal {
   CLKernel addCBiasesNCKernel;
   CLKernel addCBiasesNCReluKernel;
   CLKernel addCBiasesNCMishKernel;
+  CLKernel addCBiasesNCMishScale8Kernel;
   CLKernel extractChannel0NCHWKernel;
   CLKernel xgemmDirectBatchedTTKernelAlwaysFP32;
   CLKernel xgemmDirectStridedBatchedNNKernel;
@@ -564,6 +573,8 @@ struct ComputeHandleInternal {
     CHECK_ERR(err);
     winogradConv3x3NCHWBNMishTransformKernel = clCreateKernel(progs->winogradConv3x3NCHWBNMishTransformProgram, "bnActTransform", &err);
     CHECK_ERR(err);
+    winogradConv3x3NCHWBNMishScale8TransformKernel = clCreateKernel(progs->winogradConv3x3NCHWBNMishScale8TransformProgram, "bnActTransform", &err);
+    CHECK_ERR(err);
     winogradConv3x3NCHWUntransformKernel = clCreateKernel(progs->winogradConv3x3NCHWUntransformProgram, "untransform", &err);
     CHECK_ERR(err);
 
@@ -573,6 +584,8 @@ struct ComputeHandleInternal {
     CHECK_ERR(err);
     winogradConv5x5NCHWBNMishTransformKernel = clCreateKernel(progs->winogradConv5x5NCHWBNMishTransformProgram, "bnActTransform", &err);
     CHECK_ERR(err);
+    winogradConv5x5NCHWBNMishScale8TransformKernel = clCreateKernel(progs->winogradConv5x5NCHWBNMishScale8TransformProgram, "bnActTransform", &err);
+    CHECK_ERR(err);
     winogradConv5x5NCHWUntransformKernel = clCreateKernel(progs->winogradConv5x5NCHWUntransformProgram, "untransform", &err);
     CHECK_ERR(err);
 
@@ -581,6 +594,8 @@ struct ComputeHandleInternal {
     scaleBiasMaskReluNCHWKernel = clCreateKernel(progs->scaleBiasMaskReluNCHWProgram, "scaleBiasMaskActNCHW", &err);
     CHECK_ERR(err);
     scaleBiasMaskMishNCHWKernel = clCreateKernel(progs->scaleBiasMaskMishNCHWProgram, "scaleBiasMaskActNCHW", &err);
+    CHECK_ERR(err);
+    scaleBiasMaskMishScale8NCHWKernel = clCreateKernel(progs->scaleBiasMaskMishScale8NCHWProgram, "scaleBiasMaskActNCHW", &err);
     CHECK_ERR(err);
     addPointWiseKernel = clCreateKernel(progs->addPointWiseProgram, "addPointWise", &err);
     CHECK_ERR(err);
@@ -597,6 +612,8 @@ struct ComputeHandleInternal {
     addCBiasesNCReluKernel = clCreateKernel(progs->addCBiasesNCReluProgram, "addCBiasesNCAct", &err);
     CHECK_ERR(err);
     addCBiasesNCMishKernel = clCreateKernel(progs->addCBiasesNCMishProgram, "addCBiasesNCAct", &err);
+    CHECK_ERR(err);
+    addCBiasesNCMishScale8Kernel = clCreateKernel(progs->addCBiasesNCMishScale8Program, "addCBiasesNCAct", &err);
     CHECK_ERR(err);
     extractChannel0NCHWKernel = clCreateKernel(progs->extractChannel0NCHWProgram, "extractChannel0NCHW", &err);
     CHECK_ERR(err);
@@ -885,14 +902,11 @@ struct BatchNormLayer {
     assert(desc->variance.size() == numChannels);
     assert(desc->scale.size() == numChannels);
     assert(desc->bias.size() == numChannels);
+    assert(desc->mergedScale.size() == numChannels);
+    assert(desc->mergedBias.size() == numChannels);
 
-    vector<float> mergedScale(numChannels);
-    vector<float> mergedBias(numChannels);
-    for(int i = 0; i<numChannels; i++) {
-      mergedScale[i] = desc->scale[i] / std::sqrt(desc->variance[i] + epsilon);
-      mergedBias[i] = desc->bias[i] - mergedScale[i] * desc->mean[i];
-    }
-
+    std::vector<float> mergedScale = desc->mergedScale;
+    std::vector<float> mergedBias = desc->mergedBias;
     mergedScaleBuf = createReadOnlyBuffer(handle,mergedScale,useFP16);
     mergedBiasBuf = createReadOnlyBuffer(handle,mergedBias,useFP16);
 
@@ -913,6 +927,8 @@ struct BatchNormLayer {
       kernel = handle->scaleBiasMaskReluNCHWKernel;
     else if(activation == ACTIVATION_MISH)
       kernel = handle->scaleBiasMaskMishNCHWKernel;
+    else if(activation == ACTIVATION_MISH_SCALE8)
+      kernel = handle->scaleBiasMaskMishScale8NCHWKernel;
     else {
       assert(false);
       Global::fatalError("bad activation");
@@ -1322,13 +1338,17 @@ struct ConvLayer {
   ) const {
     if((convXSize == 3 && convYSize == 3) || (convXSize == 5 && convYSize == 5)) {
       {
-        assert(bnLayer->activation == ACTIVATION_RELU || bnLayer->activation == ACTIVATION_MISH);
+        assert(bnLayer->activation == ACTIVATION_RELU || bnLayer->activation == ACTIVATION_MISH || bnLayer->activation == ACTIVATION_MISH_SCALE8);
         cl_int err;
         MAYBE_EVENT;
         err = doWinogradTransformWithBNAct(
           (convXSize == 3 && convYSize == 3) ?
-          (bnLayer->activation == ACTIVATION_RELU ? handle->winogradConv3x3NCHWBNReluTransformKernel : handle->winogradConv3x3NCHWBNMishTransformKernel) :
-          (bnLayer->activation == ACTIVATION_RELU ? handle->winogradConv5x5NCHWBNReluTransformKernel : handle->winogradConv5x5NCHWBNMishTransformKernel),
+          (bnLayer->activation == ACTIVATION_RELU ? handle->winogradConv3x3NCHWBNReluTransformKernel :
+           bnLayer->activation == ACTIVATION_MISH ? handle->winogradConv3x3NCHWBNMishTransformKernel :
+           handle->winogradConv3x3NCHWBNMishScale8TransformKernel) :
+          (bnLayer->activation == ACTIVATION_RELU ? handle->winogradConv5x5NCHWBNReluTransformKernel :
+           bnLayer->activation == ACTIVATION_MISH ? handle->winogradConv5x5NCHWBNMishTransformKernel :
+           handle->winogradConv5x5NCHWBNMishScale8TransformKernel),
           handle->commandQueue,
           handle->tuneParams,
           input,convWorkspace,
@@ -1513,6 +1533,8 @@ struct MatBiasLayer {
       kernel = handle->addCBiasesNCReluKernel;
     else if(activation == ACTIVATION_MISH)
       kernel = handle->addCBiasesNCMishKernel;
+    else if(activation == ACTIVATION_MISH_SCALE8)
+      kernel = handle->addCBiasesNCMishScale8Kernel;
     else {
       assert(false);
       Global::fatalError("bad activation");
@@ -2668,7 +2690,13 @@ struct Buffers {
 
     trunk = createReadWriteBuffer(handle, m.trunk->trunkNumChannels * batchXYElts, useFP16);
 
-    assert(m.modelVersion >= 12 ? m.policyHead->p2Channels == 2 : m.policyHead->p2Channels == 1);
+    if(m.modelVersion >= 16)
+      testAssert(m.policyHead->p2Channels == 4);
+    else if(m.modelVersion >= 12)
+      testAssert(m.policyHead->p2Channels == 2);
+    else
+      testAssert(m.policyHead->p2Channels == 1);
+
     policyPassElts = m.policyHead->p2Channels * batchElts;
     policyPass = createReadWriteBuffer(handle, policyPassElts, false);
     policyElts = m.policyHead->p2Channels * batchXYElts;
@@ -3170,7 +3198,7 @@ void NeuralNet::getOutput(
     // policy probabilities and white game outcome probabilities
     // Also we don't fill in the nnHash here either
     // Handle modelVersion >= 12 policy optimism
-    if(numPolicyChannels == 2) {
+    if(numPolicyChannels == 2 || (numPolicyChannels == 4 && modelVersion >= 16)) {
       // OpenCL is all NCHW
       for(int i = 0; i<nnXLen*nnYLen; i++) {
         float p = policySrcBuf[i];

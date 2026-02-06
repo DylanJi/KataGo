@@ -506,11 +506,6 @@ struct BatchNormLayer {
   const bool usingFP16;
   const bool usingNHWC;
 
-  void* meanBuf;
-  void* varianceBuf;
-  void* scaleBuf;
-  void* biasBuf;
-
   void* mergedScaleBuf;
   void* mergedBiasBuf;
 
@@ -539,31 +534,15 @@ struct BatchNormLayer {
     (void)cudaHandles;
 
     assert(desc->mean.size() == numChannels);
-    CudaUtils::mallocAndCopyToDevice(name,desc->mean,meanBuf,useFP16);
-
     assert(desc->variance.size() == numChannels);
-    CudaUtils::mallocAndCopyToDevice(name,desc->variance,varianceBuf,useFP16);
-
     assert(desc->scale.size() == numChannels);
-    CudaUtils::mallocAndCopyToDevice(name,desc->scale,scaleBuf,useFP16);
-
     assert(desc->bias.size() == numChannels);
-    CudaUtils::mallocAndCopyToDevice(name,desc->bias,biasBuf,useFP16);
-
-    vector<float> mergedScale(numChannels);
-    vector<float> mergedBias(numChannels);
-    for(int i = 0; i<numChannels; i++) {
-      mergedScale[i] = desc->scale[i] / sqrt(desc->variance[i] + epsilon);
-      mergedBias[i] = desc->bias[i] - mergedScale[i] * desc->mean[i];
-    }
-    CudaUtils::mallocAndCopyToDevice(name,mergedScale,mergedScaleBuf,useFP16);
-    CudaUtils::mallocAndCopyToDevice(name,mergedBias,mergedBiasBuf,useFP16);
+    assert(desc->mergedScale.size() == numChannels);
+    assert(desc->mergedBias.size() == numChannels);
+    CudaUtils::mallocAndCopyToDevice(name,desc->mergedScale,mergedScaleBuf,useFP16);
+    CudaUtils::mallocAndCopyToDevice(name,desc->mergedBias,mergedBiasBuf,useFP16);
   }
   ~BatchNormLayer() {
-    cudaFree(meanBuf);
-    cudaFree(varianceBuf);
-    cudaFree(scaleBuf);
-    cudaFree(biasBuf);
     cudaFree(mergedScaleBuf);
     cudaFree(mergedBiasBuf);
   }
@@ -1390,7 +1369,6 @@ struct SGFMetadataEncoder {
 
 //----------------------------------------------------------------------------
 
-
 struct Trunk {
   const string name;
   const int modelVersion;
@@ -1558,6 +1536,7 @@ struct Trunk {
 
     //And now with the final BN port it from trunkScratch.buf to trunkBuf.
     trunkTipBN->apply(cudaHandles,batchSize,trunkScratch.buf,maskBuf,trunkBuf);
+
     #ifdef DEBUG_INTERMEDIATE_VALUES
     CudaUtils::debugPrint4D(string("Trunk tip"), trunkBuf, batchSize, trunkNumChannels, nnXLen, nnYLen, usingNHWC, usingFP16);
     #endif
@@ -1716,8 +1695,8 @@ struct PolicyHead {
     #ifdef DEBUG_INTERMEDIATE_VALUES
     CudaUtils::debugPrint4D(string("p1 pre-gpool-sum"), p1Out.buf, batchSize, p1Channels, nnXLen, nnYLen, usingNHWC, usingFP16);
     CudaUtils::debugPrint4D(string("g1 pre-gpool"), g1Out.buf, batchSize, g1Channels, nnXLen, nnYLen, usingNHWC, usingFP16);
-    CudaUtils::debugPrint2D(string("g1 pooled"), g1Concat.buf, batchSize, g1Channels*3, usingFP16);
-    CudaUtils::debugPrint2D(string("g1 biases"), g1Bias.buf, batchSize, p1Channels, usingFP16);
+    CudaUtils::debugPrint2D(string("g1 pooled"), g1Concat.buf, batchSize, g1Channels*3, false);
+    CudaUtils::debugPrint2D(string("g1 biases"), g1Bias.buf, batchSize, p1Channels, false);
     #endif
 
     float* p1OutBufA;
@@ -1752,9 +1731,9 @@ struct PolicyHead {
     }
 
     #ifdef DEBUG_INTERMEDIATE_VALUES
-    CudaUtils::debugPrint4D(string("p1 after-gpool-sum"), p1Out.buf, batchSize, p1Channels, nnXLen, nnYLen, usingNHWC, usingFP16);
-    CudaUtils::debugPrint2D(string("policypass"), policyPassBuf, batchSize, 1, usingFP16);
-    CudaUtils::debugPrint4D(string("policy"), policyBuf, batchSize, p2Channels, nnXLen, nnYLen, usingNHWC, usingFP16);
+    CudaUtils::debugPrint4D(string("p1 after-gpool-sum"), p1OutBufA, batchSize, p1Channels, nnXLen, nnYLen, usingNHWC, false);
+    CudaUtils::debugPrint2D(string("policypass"), policyPassBuf, batchSize, 1, false);
+    CudaUtils::debugPrint4D(string("policy"), policyBuf, batchSize, p2Channels, nnXLen, nnYLen, usingNHWC, false);
     #endif
 
   }
@@ -1898,8 +1877,8 @@ struct ValueHead {
 
     #ifdef DEBUG_INTERMEDIATE_VALUES
     CudaUtils::debugPrint4D(string("v1"), v1Out.buf, batchSize, v1Channels, nnXLen, nnYLen, usingNHWC, usingFP16);
-    CudaUtils::debugPrint2D(string("v1 pooled"), v1Mean.buf, batchSize, v1Channels, usingFP16);
-    CudaUtils::debugPrint2D(string("v2"), v2Out.buf, batchSize, v1Channels, usingFP16);
+    CudaUtils::debugPrint2D(string("v1 pooled"), v1Mean.buf, batchSize, v1Channels, false);
+    CudaUtils::debugPrint2D(string("v2"), v2Out.buf, batchSize, v1Channels, false);
     #endif
 
     if(!usingFP16) {
@@ -2146,6 +2125,7 @@ struct LoadedModel {
 
   LoadedModel(const string& fileName, const string& expectedSha256) {
     ModelDesc::loadFromFileMaybeGZipped(fileName,modelDesc,expectedSha256);
+    modelDesc.applyScale8ToReduceActivations();
   }
 
   LoadedModel() = delete;
@@ -2162,24 +2142,8 @@ void NeuralNet::freeLoadedModel(LoadedModel* loadedModel) {
   delete loadedModel;
 }
 
-string NeuralNet::getModelName(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.name;
-}
-
-int NeuralNet::getModelVersion(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.modelVersion;
-}
-
-int NeuralNet::getNumInputMetaChannels(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.numInputMetaChannels;
-}
-
-Rules NeuralNet::getSupportedRules(const LoadedModel* loadedModel, const Rules& desiredRules, bool& supported) {
-  return loadedModel->modelDesc.getSupportedRules(desiredRules, supported);
-}
-
-ModelPostProcessParams NeuralNet::getPostProcessParams(const LoadedModel* loadedModel) {
-  return loadedModel->modelDesc.postProcessParams;
+const ModelDesc& NeuralNet::getModelDesc(const LoadedModel* loadedModel) {
+  return loadedModel->modelDesc;
 }
 
 //------------------------------------------------------------------------------
@@ -2245,7 +2209,13 @@ struct Buffers {
       inputMetaBuf = NULL;
     }
 
-    assert(m.modelVersion >= 12 ? m.policyHead->p2Channels == 2 : m.policyHead->p2Channels == 1);
+    if(m.modelVersion >= 16)
+      testAssert(m.policyHead->p2Channels == 4);
+    else if(m.modelVersion >= 12)
+      testAssert(m.policyHead->p2Channels == 2);
+    else
+      testAssert(m.policyHead->p2Channels == 1);
+
     policyPassBufBytes = m.policyHead->p2Channels * batchFloatBytes;
     CUDA_ERR("Buffers",cudaMalloc(reinterpret_cast<void**>(&policyPassBuf), policyPassBufBytes));
     policyBufBytes = m.policyHead->p2Channels * batchXYFloatBytes;
@@ -2757,11 +2727,11 @@ void NeuralNet::getOutput(
     // policy probabilities and white game outcome probabilities
     // Also we don't fill in the nnHash here either
     // Handle version >= 12 policy optimism
-    if(numPolicyChannels == 2) {
-      if(gpuHandle->usingNHWC) {
+    if(numPolicyChannels == 2 || (numPolicyChannels == 4 && modelVersion >= 16)) {
+       if(gpuHandle->usingNHWC) {
         for(int i = 0; i<nnXLen*nnYLen; i++) {
-          float p = policySrcBuf[i*2];
-          float pOpt = policySrcBuf[i*2+1];
+          float p = policySrcBuf[i*numPolicyChannels];
+          float pOpt = policySrcBuf[i*numPolicyChannels+1];
           policyProbsTmp[i] = p + (pOpt-p) * policyOptimism;
         }
         SymmetryHelpers::copyOutputsWithSymmetry(policyProbsTmp, policyProbs, 1, nnYLen, nnXLen, inputBufs[row]->symmetry);
