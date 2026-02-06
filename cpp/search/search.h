@@ -382,6 +382,9 @@ struct Search {
   std::vector<double> getAverageTreeOwnership(const SearchNode* node = NULL) const;
   std::pair<std::vector<double>,std::vector<double>> getAverageAndStandardDeviationTreeOwnership(const SearchNode* node = NULL) const;
 
+  // Get Safe Area map
+  std::vector<Color> getSafeArea(const SearchNode* node = NULL) const;
+
   //Same, but applies symmetry and perspective
   std::vector<double> getAverageTreeOwnership(
     const Player perspective,

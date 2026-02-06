@@ -1,6 +1,7 @@
 #include "../program/playutils.h"
 
 #include <sstream>
+#include <chrono>
 
 #include "../core/timer.h"
 #include "../core/test.h"
@@ -685,9 +686,16 @@ vector<double> PlayUtils::computeOwnership(
 
   bot->setParams(newParams);
   bot->setPosition(pla,board,hist);
+  auto start = std::chrono::high_resolution_clock::now();
   bot->runWholeSearch(pla);
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  cout << "runWholeSearch, time cost " << elapsed.count() << endl;
 
   vector<double> ownerships = bot->getAverageTreeOwnership();
+  auto end1 = std::chrono::high_resolution_clock::now();
+  elapsed = end1 - start;
+  cout << "getAverageTreeOwnership, time cost " << elapsed.count() << endl;
 
   bot->setParams(oldParams);
   bot->setAlwaysIncludeOwnerMap(oldAlwaysIncludeOwnerMap);

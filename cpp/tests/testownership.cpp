@@ -43,10 +43,14 @@ void Tests::runOwnershipTests(const string& configFile, const string& modelFile)
     Player nextPla = P_BLACK;
     BoardHistory hist(board,nextPla,rules,0);
     int64_t numVisits = 100;
+    auto start = std::chrono::high_resolution_clock::now();
     vector<double> ownership = PlayUtils::computeOwnership(bot,board,hist,nextPla,numVisits);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed = end - start;
     cout << "=================================================================================" << endl;
     cout << rules << endl;
     cout << board << endl;
+    cout << "time cost " << elapsed.count() << endl;
     for(int y = 0; y<board.y_size; y++) {
       for(int x = 0; x<board.x_size; x++) {
         int pos = NNPos::xyToPos(x,y,nnXLen);

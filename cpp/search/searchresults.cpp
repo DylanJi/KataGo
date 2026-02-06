@@ -1765,6 +1765,21 @@ vector<double> Search::getAverageTreeOwnership(const SearchNode* node) const {
   return vec;
 }
 
+vector<Color> Search::getSafeArea(const SearchNode* node) const {
+  if(node == NULL)
+    node = rootNode;
+  const Board& board = rootBoard;
+  vector<Color> vec(nnXLen*nnYLen, 0);
+  for(int y = 0; y < board.y_size; y++) {
+    for(int x = 0; x < board.x_size; x++) {
+      int pos = NNPos::xyToPos(x, y, nnXLen);
+      Loc loc = Location::getLoc(x, y, board.x_size);
+      vec[pos] = rootSafeArea[loc];
+    }
+  }
+  return vec;
+}
+
 std::pair<vector<double>,vector<double>> Search::getAverageAndStandardDeviationTreeOwnership(const SearchNode* node) const {
   if(node == NULL)
     node = rootNode;
@@ -2210,6 +2225,9 @@ bool Search::getAnalysisJson(
     int symmetry = 0;
     ret["ownership"] = json(getAverageTreeOwnership(perspective, rootNode, symmetry));
   }
+
+  // add root safe rear
+  ret["safeArea"] = json(getSafeArea(rootNode));
 
   return true;
 }

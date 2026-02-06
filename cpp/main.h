@@ -11,6 +11,7 @@ namespace MainCmds {
   int tuner(const std::vector<std::string>& args);
   int match(const std::vector<std::string>& args);
   int selfplay(const std::vector<std::string>& args);
+  int runownershipobtain(const std::vector<std::string>& args);
 
   int testgpuerror(const std::vector<std::string>& args);
 
@@ -35,6 +36,7 @@ namespace MainCmds {
   int runownershipspeedtest(const std::vector<std::string>& args);
   int runsleeptest(const std::vector<std::string>& args);
   int runconfigtests(const std::vector<std::string>& args);
+  
 
   int samplesgfs(const std::vector<std::string>& args);
   int dataminesgfs(const std::vector<std::string>& args);
